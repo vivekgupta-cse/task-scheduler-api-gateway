@@ -8,6 +8,7 @@ plugins {
 
 tasks.test {
     useJUnitPlatform()
+    finalizedBy(tasks.jacocoTestReport) // Generate JaCoCo report after tests run
 }
 
 // Configure JaCoCo reporting
