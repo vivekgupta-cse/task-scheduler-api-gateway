@@ -1,4 +1,4 @@
-package com.taskscheduler.apigateway.filter;
+package com.taskscheduler.apigateway.config;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.buffer.DataBuffer;

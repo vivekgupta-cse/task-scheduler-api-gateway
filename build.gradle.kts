@@ -50,6 +50,11 @@ dependencies {
 
     // Reactive runtime
     implementation("org.springframework.boot:spring-boot-starter-webflux")
+    // Spring Security
+    implementation("org.springframework.boot:spring-boot-starter-security")
+
+    implementation("com.bucket4j:bucket4j-core:8.10.1")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.2.3")
 
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")

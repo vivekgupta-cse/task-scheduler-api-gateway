@@ -9,12 +9,16 @@ spring:
       server:
         webflux: # You MUST add this level for the WebFlux starter in Boot 4
           routes:
-            - id: task-manager-monolith
-              uri: http://localhost:9090
+            - id: task-scheduler-auth-service
+              uri: http://localhost:8085
               predicates:
-                - Path=/api/**
+                - Path=/api/auth/**
+            - id: task-scheduler-task-service
+              uri: http://localhost:8086
+              predicates:
+                - Path=/api/tasks/**
       globalcors:
         corsConfigurations:
           '[/**]':
-            allowedOrigins: "http://localhost:9090"
+            allowedOrigins: "http://localhost:8086"
             allowedMethods: ["GET", "POST", "PUT", "DELETE"]

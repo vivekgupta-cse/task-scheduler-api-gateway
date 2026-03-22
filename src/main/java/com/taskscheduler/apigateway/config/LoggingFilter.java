@@ -1,4 +1,4 @@
-package com.taskscheduler.apigateway.filter;
+package com.taskscheduler.apigateway.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
