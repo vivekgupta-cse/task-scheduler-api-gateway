@@ -1,3 +1,7 @@
+group = "com.taskscheduler"
+version = "1.0-SNAPSHOT"
+description = "TaskScheduler API Gateway"
+
 plugins {
     java
     jacoco
@@ -5,6 +9,15 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
 }
 
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
 
 tasks.test {
     useJUnitPlatform()
@@ -16,13 +29,11 @@ jacoco {
     toolVersion = "0.8.13"
 }
 
-group = "com.taskscheduler"
-version = "1.0-SNAPSHOT"
-description = "TaskScheduler API Gateway"
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+tasks.jacocoTestReport {
+    dependsOn(tasks.test) // tests are required to run before generating the report
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
     }
 }
 
@@ -31,10 +42,6 @@ dependencyManagement {
         // Use a Spring Cloud BOM compatible with Spring Boot 4.x
         mavenBom("org.springframework.cloud:spring-cloud-dependencies:2025.1.1")
     }
-}
-
-repositories {
-    mavenCentral()
 }
 
 dependencies {
@@ -49,12 +56,4 @@ dependencies {
     testImplementation("io.projectreactor:reactor-test")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     testImplementation("org.mockito:mockito-core:5.6.0")
-}
-
-tasks.jacocoTestReport {
-    dependsOn(tasks.test) // tests are required to run before generating the report
-    reports {
-        xml.required.set(true)
-        html.required.set(true)
-    }
 }
