@@ -1,216 +1,253 @@
+and to inspect the dependency tree for conflicts:
 # TaskScheduler API Gateway
 
-A small Spring Boot API Gateway based on Spring Cloud Gateway (WebFlux) that proxies requests to an existing backend (by default `http://localhost:9090`).
+A production-oriented Spring Cloud Gateway (Spring WebFlux) implementation that acts as a centralized API gateway in front of the TaskScheduler microservices. The gateway provides routing, request/response filters, CORS, security entry points, observability hooks, and a small set of operational features intended for local development and as a basis for production deployment.
 
-This repository contains a minimal gateway intended for local development and as a starting point for production-ready API gateway features (routing, CORS, filters, resilience, observability).
+This repository intentionally focuses on the gateway responsibilities only — downstream services (auth, tasks, etc.) own business logic and authentication. The gateway forwards requests to them and optionally performs cross-cutting concerns such as JWT validation, header enrichment, rate-limiting, request logging, and path normalization.
 
----
+Table of contents
+- Overview & architecture
+- Quickstart (development)
+- Configuration and routes
+- Security model
+- Filters and header propagation (RequestId, Logging, Rate limiting)
+- Observability (logs, metrics, traces)
+- Deployment & production checklist
+- Testing and troubleshooting
+- Contributing
 
-## What's included
+Overview & architecture
+-----------------------
 
-- `src/main/java/com/taskscheduler/apigateway/ApiGateway.java` — Spring Boot main application.
-- `src/main/resources/application.yaml` — gateway configuration (routes, CORS, server port).
-- `build.gradle.kts` — Kotlin Gradle build with Spring Boot and Spring Cloud dependency management.
+High level:
 
----
+- Clients -> API Gateway (this repo) -> Backend services (auth service on 8085, tasks service on 8086, ...)
 
-## Quick overview
+Responsibilities of the gateway:
 
-- The gateway is configured to forward all incoming requests (catch-all route) to `http://localhost:9090` by default.
-- The project uses the reactive stack (Spring WebFlux + Spring Cloud Gateway).
+- Centralized routing and path handling (Spring Cloud Gateway)
+- Lightweight request enrichment (X-Request-Id propagation, correlation)
+- Cross-cutting features: CORS, authentication / authorization (optional), rate limiting, request logging
+- Observability: structured logs and hooks for metrics/tracing
 
----
+ASCII diagram:
 
-## Prerequisites
+    +--------+      +-------------+      +----------------+
+    | Client | ---> | API Gateway | ---> | tasks service  |
+    +--------+      +-------------+      +----------------+
+                             |
+                             +--> auth service (8085)
 
-- Java JDK installed. This project sets a Java toolchain in `build.gradle.kts` (Java language version: 25). Ensure a matching JDK is installed on your machine. If you prefer a different JDK, update the toolchain or run Gradle with a compatible Java.
-- Gradle wrapper included — use the wrapper (`./gradlew`) to build and run so you get the expected Gradle version.
+Quickstart (development)
+-------------------------
 
----
+Prerequisites
+- Java JDK (project uses a Gradle toolchain, verify local JDK matches the requested toolchain or configure Gradle to use an installed JDK).
+- Gradle wrapper included (use `./gradlew`).
+- Downstream services should be running locally for end-to-end verification (auth service on `http://localhost:8085`, tasks service on `http://localhost:8086`).
 
-## Build & run (development)
+Build and run
 
-1. Build the project (skip tests locally):
+1. Build the project (skip tests for a quick local dev build):
 
 ```bash
 ./gradlew clean build -x test
 ```
 
-2. Run the gateway from Gradle:
+2. Run the gateway in development mode:
 
 ```bash
 ./gradlew bootRun
 ```
 
-3. Alternatively build the fat JAR and run it:
+3. Alternatively build a runnable JAR and start it:
 
 ```bash
 ./gradlew bootJar
-java -jar build/libs/task-scheduler-api-gateway-1.0-SNAPSHOT.jar
+java -jar build/libs/task-scheduler-api-gateway-*.jar
 ```
 
-By default the gateway reads `src/main/resources/application.yaml` for configuration. The configured server port in the repository is `8081` — requests to `http://localhost:8081` are forwarded to the backend at `http://localhost:9090`.
+By default the gateway server port is configured in `src/main/resources/application.yaml` (commonly `8081`). The gateway routes to the downstream services configured in the same YAML.
 
-Example request (should be proxied to your backend):
+Example requests to validate routing (assuming downstream services are running):
 
 ```bash
-curl -v http://localhost:8081/any/path
+# Direct to tasks service (should succeed when called directly)
+curl -v http://localhost:8086/api/tasks
+
+# Through gateway (should be proxied to downstream tasks service)
+curl -v http://localhost:8081/api/tasks
 ```
 
-If your backend requires a path prefix, the gateway will forward the full path. Adjust routing or add filters (RewritePath) if you need to strip or rewrite prefixes.
+Configuration and routes
+------------------------
 
----
+All runtime configuration lives in `src/main/resources/application.yaml`. Key sections:
 
-## Configuration (important files)
+- `server.port` — gateway port (default 8081)
+- `spring.cloud.gateway.routes` — route definitions and target URIs
+- `spring.cloud.gateway.globalcors` — global CORS configuration
 
-- `src/main/resources/application.yaml` — central configuration used by Spring Boot. Key snippets:
+Example route snippet (existing):
 
-  - server port:
-
-    ```yaml
-    server:
-      port: 8081
-    ```
-
-  - catch-all route (forwards everything to the backend):
-
-    ```yaml
-    spring:
-      cloud:
-        gateway:
+```yaml
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
           routes:
-            - id: task-manager-monolith
-              uri: http://localhost:9090
+            - id: task-scheduler-auth-service
+              uri: http://localhost:8085
               predicates:
-                - Path=/**
-    ```
-
-  - global CORS (development permissive example):
-
-    ```yaml
-    spring:
-      cloud:
-        gateway:
-          globalcors:
-            corsConfigurations:
-              '[/**]':
-                allowedOrigins: "*"
-                allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
-    ```
-
-Notes:
-- To change the backend target, edit the `uri` in the route above.
-- To restrict CORS in production, replace `"*"` with a list of allowed origins.
-- You can override any property at runtime via environment variables (for example `SPRING_APPLICATION_JSON`) or the standard Spring Boot property precedence.
-
----
-
-## Common changes you will want to make
-
-- Add route filters (rewrite path, add/remove headers, rate limiting): see Spring Cloud Gateway `filters` in `application.yaml`.
-- Enable Actuator & monitoring: add `spring-boot-starter-actuator` and configure management endpoints. In production, protect actuator endpoints.
-- Add security (OAuth2/JWT) to the gateway or integrate with a centralized auth service.
-- Add resilience (Circuit Breaker, retry) and rate limiting (Redis-based limits or token buckets).
-
----
-
-## Troubleshooting
-
-If you encounter startup exceptions similar to these:
-
-- `Failed to generate bean name for imported class 'org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration'`
-- `Failed to generate bean name for imported class 'org.springframework.cloud.autoconfigure.RefreshAutoConfiguration'`
-
-These are usually caused by an auto-configuration class referencing servlet/MVC classes or Spring Cloud modules that are not on the classpath for a purely reactive application. Ways to fix:
-
-1. Ensure dependencies are aligned with your Spring Boot version. Use the Spring Cloud BOM that matches your Spring Boot release (dependency management). The project uses Spring Boot 4.x — be sure to pick the matching Spring Cloud release train.
-
-2. Exclude the problematic auto-configurations if you don't need them. Two approaches:
-
-- Application property (in `application.yaml`):
-  ```yaml
-  spring:
-    autoconfigure:
-      exclude:
-        - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration
-        - org.springframework.cloud.autoconfigure.RefreshAutoConfiguration
-  ```
-
-- Or in the main class via annotation:
-  ```java
-  @SpringBootApplication(exclude = {
-      org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration.class,
-      org.springframework.cloud.autoconfigure.RefreshAutoConfiguration.class
-  })
-  public class ApiGateway { ... }
-  ```
-
-3. If the app still fails, run with stacktrace and info logging and paste the output here. Useful commands:
-
-```bash
-./gradlew bootRun --stacktrace --info
-``` 
-
-and to inspect the dependency tree for conflicts:
-
-```bash
-./gradlew dependencies --configuration runtimeClasspath
+                - Path=/api/auth/**
+            - id: task-scheduler-task-service
+              uri: http://localhost:8086
+              predicates:
+                - Path=/api/tasks/**
 ```
 
----
+Notes
+- Route-level filters are powerful: you can rewrite paths, add or remove headers, set timeouts, or add circuit-breakers.
+- For production you will usually externalize these settings (config server, environment variables, Kubernetes config maps, etc.).
 
-## Docker (example)
+Security model
+--------------
 
-A simple Dockerfile for packaging and running the built JAR (multi-stage build):
+This gateway can be used in two common modes:
 
-```dockerfile
-# Build stage
-FROM gradle:9-jdk17 as build
-WORKDIR /src
-COPY . /src
-RUN gradle bootJar --no-daemon -x test
+1) Pass-through mode (default in this repo): gateway forwards requests (including Authorization header) to downstream services which perform authentication and authorization.
+   - Use this when backend services are responsible for auth, or when you prefer a lightweight gateway.
 
-# Run stage
-FROM eclipse-temurin:17-jre
-WORKDIR /app
-COPY --from=build /src/build/libs/*.jar app.jar
-EXPOSE 8081
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+2) Gateway-auth mode: the gateway validates tokens (e.g., JWT) and enforces auth policies centrally. The gateway then forwards an authenticated principal or asserts headers to downstream services.
+
+Which to use depends on your operational model. The repo includes `SecurityConfig` where permitted paths and authentication settings are defined. For production-grade centralized auth you should wire a reactive JWT decoder and validate tokens at the gateway.
+
+Filters and header propagation
+------------------------------
+
+This project includes several filters that implement common cross-cutting concerns — critically, `RequestIdFilter` and `LoggingFilter`.
+
+- `RequestIdFilter` (reactive `WebFilter`):
+  - Ensures every request has an `X-Request-Id`. If a client provides one it is preserved, otherwise a UUID is generated.
+  - The filter sets the header on the proxied request (mutates the `ServerHttpRequest`) so downstream services receive the same `X-Request-Id` and also sets it on response headers.
+  - The filter populates a `requestId` entry in the MDC so logs produced during the request processing include the correlation id.
+
+- `LoggingFilter` (global filter):
+  - Aggregates and logs request metadata and textual bodies up to a configurable size.
+  - Logs response status codes and timing.
+
+- `RateLimitFilter` (WebFilter):
+  - Demonstrates simple IP-based rate limiting using Bucket4j and an in-memory Caffeine cache. For production, replace with a distributed rate limiter (Redis, etc.) to scale horizontally.
+
+Important: header casing is case-insensitive. The gateway ensures the header `X-Request-Id` is added to the proxied request so downstream services can log and return it.
+
+Observability (logs, metrics, traces)
+-----------------------------------
+
+Logging
+- Filters write structured log lines with request path, method, headers and body snippet. The project includes Logback configuration in `src/main/resources/logback-spring.xml`.
+- Ensure logs include the `requestId` MDC value.
+
+Metrics & Tracing
+- Integrate Micrometer for metrics and export to Prometheus. Add OTLP/OpenTelemetry configuration for distributed tracing.
+- Suggested starters: `micrometer-registry-prometheus`, `opentelemetry-exporter-otlp`.
+
+Production deployment & checklist
+--------------------------------
+
+Essentials
+- Use TLS for client <-> gateway and gateway <-> backend communications.
+- Use a discovery mechanism for backend targets (Eureka/Consul/Kubernetes service names) rather than hard-coded `localhost` URIs.
+- Externalize configuration (secrets, JWT signing keys, rate limit configs) into a secure location — secret manager, vault, K8s secrets, etc.
+- Use a distributed rate limiter and shared state (Redis, etc.) when running multiple gateway instances.
+- Add readiness/liveness probes and health checks for the gateway and its downstream dependencies.
+
+Security
+- Validate and sanitize inbound headers. Carefully audit which headers are forwarded to backend services.
+- If gateway terminates authentication, do not blindly forward authentication-sensitive headers unless intended.
+
+Scaling
+- Run multiple gateway instances behind a load balancer. Use sticky sessions only if required; prefer stateless JWTs for scale.
+
+Operational concerns
+- Centralized logging (ELK/EFK) and structured JSON logs.
+- Centralized tracing (OpenTelemetry) to correlate requests across gateway and backends using `X-Request-Id`/trace ids.
+
+Testing and troubleshooting
+-------------------------
+
+Local troubleshooting steps
+- Check gateway logs (console or configured log file) for messages from `LoggingFilter` — these show Gateway Request/Response entries.
+- Ensure downstream services are reachable: `curl -v http://localhost:8086/api/tasks`.
+- When the upstream request fails with `401` issued by the gateway (WWW-Authenticate: Basic), verify `SecurityConfig` and permitted paths. The gateway may be rejecting the request before forwarding.
+
+Verifying `X-Request-Id` propagation
+1. Make a request without the header to the gateway:
+
+```bash
+curl -i -v 'http://localhost:8081/api/tasks' -H 'Content-Type: application/json' --data ''
 ```
 
-Adjust the base JDK in the Dockerfile to match the toolchain you use locally.
+2. The response should include an `X-Request-Id` response header. Check your downstream logs (task service) to see the same header value received.
 
----
+3. Make a request with an explicit `X-Request-Id` and verify the same value reaches the backend:
 
-## Production considerations & checklist
+```bash
+curl -i -v 'http://localhost:8081/api/tasks' -H 'X-Request-Id: my-test-id' -H 'Content-Type: application/json' --data ''
+```
 
-- Align Spring Boot / Spring Cloud versions using the BOM. Keep dependency management consistent across modules.
-- Configure TLS (HTTPS) for the gateway and secure backend connections.
-- Add authentication, authorization, and centralized identity (opaque tokens / JWT) if the gateway terminates auth.
-- Limit CORS to trusted origins and enable `allowCredentials` only if needed.
-- Add request/response logging and tracing (OpenTelemetry) and hook up to centralized observability.
-- Harden headers (HSTS, X-Content-Type-Options, X-Frame-Options, etc.).
-- Add rate limiting, quotas, and circuit breakers.
-- Add health checks and readiness/liveness endpoints (Actuator) behind proper protections.
+If the downstream service does not receive the header:
+- Confirm the gateway process was restarted after code changes.
+- Confirm no other filters later in the chain are removing or overwriting the header.
+- Ensure the downstream is not behind an additional proxy that strips headers.
 
----
+Automated tests
+- Unit tests in `src/test/java` cover filter behavior. Run:
 
-## Contributing
+```bash
+./gradlew test
+```
 
-- Create issues for bugs or feature requests.
-- Open pull requests against `main` with descriptive titles and link to issues when relevant.
+CI/CD and container image
+-------------------------
 
----
+Example Dockerfile (multi-stage) — keep images small and run as a non-root user in production. See `Dockerfile` example in the original repository for a pattern.
 
-## License
+Add the gateway image to your CI pipeline and perform rolling updates with health checks. Use canary or blue/green deployments for safe rollouts.
 
-This project does not include a license file. Add a `LICENSE` file to specify terms if you intend to share it publicly.
+Contributing
+------------
 
----
+- Open issues for bugs or feature requests.
+- Open PRs against `main` with clear descriptions and tests for behavioral changes.
+- Keep the gateway small and focused — prefer delegating business logic to downstream services.
 
-If you'd like, I can:
-- Add a `Dockerfile` and `Makefile` to streamline local development.
-- Add example `curl` tests and a small integration test that starts the gateway and verifies a proxied request (requires a running backend or a stub).
-- Align the Gradle build to a specific Spring Cloud release train if you tell me which Spring Boot version you prefer.
+License
+-------
 
-Tell me which additional items you'd like me to add to the README or repo (Dockerfile, example tests, stricter CORS policies, etc.) and I will implement them.
+This repository does not include a license file. Add a `LICENSE` to specify terms if you intend to publish this publicly.
+
+Contact / support
+-----------------
+
+If you want help extending the gateway (JWT integration, distributed rate limiting, tracing, or production hardening), open an issue or ask for a patch — I can provide implementation examples and CI-ready tests.
+
+Author
+------
+
+Vivek Gupta
+
+- Email: gvivek206@gmail.com
+
+License
+-------
+
+This project is licensed under the Apache License
+
+    Apache License
+    Version 2.0, January 2004
+    http://www.apache.org/licenses/
+
+The full license text should be present in the `LICENSE` file at the repository root. The SPDX identifier for this license is `Apache-2.0`. When you reuse code from this repository, you must comply with the terms of the Apache License 2.0.
+
