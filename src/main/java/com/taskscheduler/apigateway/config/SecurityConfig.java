@@ -16,7 +16,11 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeExchange(exchanges -> exchanges
+                        // Allow unauthenticated access to auth endpoints, static docs and health
+                        // Also allow the gateway to forward requests under /api/tasks/** to the
+                        // downstream task service which will perform its own authentication/authorization.
                         .pathMatchers("/api/auth/**",
+                                "/api/tasks/**",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
